@@ -146,7 +146,7 @@ func (c *Client) validateHTTPError(resp *http.Response, expectedCode int) error 
 	return nil
 }
 
-// CreateQuery creates a new query.
+// CreateQuery creates a new query and returns its ID.
 func (c *Client) CreateQuery(ctx context.Context, queryText, queryType, name, description, idempotencyKey, requestID string) (string, error) {
 	body := map[string]string{}
 	if queryText != "" {
@@ -213,8 +213,52 @@ func (c *Client) GetQueryStatus(ctx context.Context, queryID, requestID string) 
 	return result.Status, nil
 }
 
+type Query struct {
+	Name        string           `json:"name"`
+	Type        string           `json:"type"`
+	Text        string           `json:"text"`
+	Description string           `json:"description"`
+	Meta        Meta             `json:"meta"`
+	Issues      Issues           `json:"issues"`
+	ResultSets  []QueryResultSet `json:"result_sets"`
+	Status      string           `json:"status"`
+	ID          string           `json:"id"`
+}
+
+type Meta struct {
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+}
+
+type Issues struct {
+	Details []IssueDetail `json:"details"`
+	Message string        `json:"message"`
+	Status  int           `json:"status"`
+}
+
+type IssueDetail struct {
+	Position    Position      `json:"position"`
+	Message     string        `json:"message"`
+	EndPosition Position      `json:"end_position"`
+	IssueCode   int           `json:"issue_code"`
+	Severity    string        `json:"severity"`
+	Issues      []IssueDetail `json:"issues"`
+	Status      int           `json:"status"`
+}
+
+type Position struct {
+	Row    int    `json:"row"`
+	Column int    `json:"column"`
+	File   string `json:"file"`
+}
+
+type QueryResultSet struct {
+	Rows      int  `json:"rows"`
+	Truncated bool `json:"truncated"`
+}
+
 // GetQuery returns the details of a query.
-func (c *Client) GetQuery(ctx context.Context, queryID, requestID string) (map[string]interface{}, error) {
+func (c *Client) GetQuery(ctx context.Context, queryID, requestID string) (*Query, error) {
 	headers := c.buildHeaders("", requestID)
 	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s", queryID)), headers, nil)
 	if err != nil {
@@ -226,12 +270,12 @@ func (c *Client) GetQuery(ctx context.Context, queryID, requestID string) (map[s
 		return nil, err
 	}
 
-	var result map[string]interface{}
+	var result Query
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
 
-	return result, nil
+	return &result, nil
 }
 
 // StopQuery stops a query from executing.
@@ -293,16 +337,26 @@ func (c *Client) WaitQueryToSucceed(ctx context.Context, queryID string, executi
 	}
 
 	if status != "COMPLETED" {
-		issues, _ := query["issues"].([]interface{})
+		var issues string
+
+		if len(query.Issues.Details) > 0 {
+			issues = query.Issues.Details[0].Message
+		}
+
 		return 0, fmt.Errorf("query %s failed with issues=%v", queryID, issues)
 	}
 
-	resultSets, ok := query["result_sets"].([]interface{})
-	if !ok {
-		return 0, fmt.Errorf("unexpected result_sets format")
-	}
+	return len(query.ResultSets), nil
+}
 
-	return len(resultSets), nil
+type ResultSet struct {
+	Columns []Column   `json:"columns"`
+	Rows    [][]string `json:"rows"`
+}
+
+type Column struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // GetQueryResultSetPage returns a page of a query result set.
