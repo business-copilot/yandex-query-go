@@ -39,7 +39,7 @@ func main() {
   LIMIT 10
  `
 
-	queryID, err := client.CreateQuery(ctx, queryText, "SQL", "Top 10 users by order count", "Example query", "", "")
+	queryID, err := client.CreateQuery(ctx, queryText, yq.AnalyticsQueryType, "Top 10 users by order count", "Example query", "", "")
 	if err != nil {
 		log.Fatalf("Failed to create query: %v", err)
 	}

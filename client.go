@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -19,6 +20,11 @@ const (
 	DefaultEndpoint    = "https://api.yandex-query.cloud.yandex.net"
 	DefaultWebBaseURL  = "https://yq.cloud.yandex.ru"
 	DefaultTokenPrefix = "Bearer "
+)
+
+const (
+	AnalyticsQueryType string = "ANALYTICS"
+	StreamingQueryType string = "STREAMING"
 )
 
 type ClientConfig struct {
@@ -91,8 +97,16 @@ func (c *Client) buildParams() map[string]string {
 	return params
 }
 
-func (c *Client) composeAPIURL(path string) string {
-	return c.config.Endpoint + path
+func (c *Client) composeAPIURL(path string, params map[string]string) string {
+	u, _ := url.Parse(c.config.Endpoint + path)
+
+	q := u.Query()
+	for k, v := range params {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 func (c *Client) composeWebURL(path string) string {
@@ -148,6 +162,8 @@ func (c *Client) validateHTTPError(resp *http.Response, expectedCode int) error 
 
 // CreateQuery creates a new query.
 func (c *Client) CreateQuery(ctx context.Context, queryText, queryType, name, description, idempotencyKey, requestID string) (string, error) {
+	params := c.buildParams()
+
 	body := map[string]string{}
 	if queryText != "" {
 		body["text"] = queryText
@@ -170,7 +186,7 @@ func (c *Client) CreateQuery(ctx context.Context, queryText, queryType, name, de
 	headers := c.buildHeaders(idempotencyKey, requestID)
 	headers.Set("Content-Type", "application/json")
 
-	resp, err := c.doRequest(ctx, "POST", c.composeAPIURL("/api/fq/v1/queries"), headers, bytes.NewBuffer(jsonBody))
+	resp, err := c.doRequest(ctx, "POST", c.composeAPIURL("/api/fq/v1/queries", params), headers, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
@@ -192,8 +208,10 @@ func (c *Client) CreateQuery(ctx context.Context, queryText, queryType, name, de
 
 // GetQueryStatus returns the status of a query.
 func (c *Client) GetQueryStatus(ctx context.Context, queryID, requestID string) (string, error) {
+	params := c.buildParams()
+
 	headers := c.buildHeaders("", requestID)
-	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/status", queryID)), headers, nil)
+	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/status", queryID), params), headers, nil)
 	if err != nil {
 		return "", err
 	}
@@ -215,8 +233,10 @@ func (c *Client) GetQueryStatus(ctx context.Context, queryID, requestID string) 
 
 // GetQuery returns the details of a query.
 func (c *Client) GetQuery(ctx context.Context, queryID, requestID string) (map[string]interface{}, error) {
+	params := c.buildParams()
+
 	headers := c.buildHeaders("", requestID)
-	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s", queryID)), headers, nil)
+	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s", queryID), params), headers, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +256,10 @@ func (c *Client) GetQuery(ctx context.Context, queryID, requestID string) (map[s
 
 // StopQuery stops a query from executing.
 func (c *Client) StopQuery(ctx context.Context, queryID, idempotencyKey, requestID string) error {
+	params := c.buildParams()
+
 	headers := c.buildHeaders(idempotencyKey, requestID)
-	resp, err := c.doRequest(ctx, "POST", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/stop", queryID)), headers, nil)
+	resp, err := c.doRequest(ctx, "POST", c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/stop", queryID), params), headers, nil)
 	if err != nil {
 		return err
 	}
@@ -316,7 +338,7 @@ func (c *Client) GetQueryResultSetPage(ctx context.Context, queryID string, resu
 	}
 
 	headers := c.buildHeaders("", requestID)
-	url := c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/results/%d", queryID, resultSetIndex))
+	url := c.composeAPIURL(fmt.Sprintf("/api/fq/v1/queries/%s/results/%d", queryID, resultSetIndex), params)
 
 	resp, err := c.doRequest(ctx, "GET", url, headers, nil)
 	if err != nil {
@@ -399,7 +421,8 @@ func (c *Client) GetQueryAllResultSets(ctx context.Context, queryID string, resu
 
 // GetOpenAPISpec returns the OpenAPI specification of the YQ HTTP API.
 func (c *Client) GetOpenAPISpec(ctx context.Context) (string, error) {
-	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL("/resources/v1/openapi.yaml"), nil, nil)
+	params := c.buildParams()
+	resp, err := c.doRequest(ctx, "GET", c.composeAPIURL("/resources/v1/openapi.yaml", params), nil, nil)
 	if err != nil {
 		return "", err
 	}
